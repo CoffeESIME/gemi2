@@ -1,40 +1,83 @@
 ---
-- name: Desplegar Phone Tracker en Raspberry Pi
+- name: Desplegar Phone Tracker (Docker) en Raspberry Pi
   hosts: raspberry
   become: true
   vars:
     app_dir: "/home/{{ ansible_user }}/phone_tracker"
+    image_name: "phone-tracker:latest"
+    container_name: "phone-tracker"
 
   tasks:
-    - name: 1. Actualizar la caché de apt
+    # ------------------------------------------------------------------
+    # 1. Preparar el entorno Docker
+    # ------------------------------------------------------------------
+    - name: 1. Instalar Docker y el SDK de Python para Docker
       ansible.builtin.apt:
         update_cache: yes
-
-    - name: 2. Instalar paquetes de manejo de hardware de video
-      ansible.builtin.apt:
         name:
-          - v4l-utils
-          - libcamera-apps
+          - docker.io
+          - python3-docker
         state: present
 
-    - name: 3. Agregar al usuario actual al grupo video
+    - name: 2. Asegurar que el servicio Docker esté corriendo
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: 3. Agregar al usuario al grupo docker (evita usar sudo)
       ansible.builtin.user:
         name: "{{ ansible_user }}"
-        groups: video
+        groups: docker,video
         append: yes
 
+    # ------------------------------------------------------------------
+    # 2. Sincronizar los archivos del proyecto
+    # ------------------------------------------------------------------
     - name: 4. Crear el directorio de la aplicación
       ansible.builtin.file:
         path: "{{ app_dir }}"
         state: directory
         owner: "{{ ansible_user }}"
         group: "{{ ansible_user }}"
-        mode: '0755'
+        mode: "0755"
 
-    - name: 5. Copiar main.py al directorio destino
+    - name: 5. Sincronizar archivos del proyecto a la Raspberry Pi
       ansible.builtin.copy:
-        src: ./main.py
-        dest: "{{ app_dir }}/main.py"
+        src: "{{ item }}"
+        dest: "{{ app_dir }}/{{ item | basename }}"
         owner: "{{ ansible_user }}"
         group: "{{ ansible_user }}"
-        mode: '0744'
+        mode: "0644"
+      loop:
+        - ./Dockerfile
+        - ./requirements.txt
+        - ./main.py
+      register: archivos_sync
+
+    # ------------------------------------------------------------------
+    # 3. Construir y ejecutar el contenedor
+    # ------------------------------------------------------------------
+    - name: 6. Construir la imagen Docker en la Raspberry Pi
+      community.docker.docker_image:
+        name: "{{ image_name }}"
+        source: build
+        build:
+          path: "{{ app_dir }}"
+        force_source: "{{ archivos_sync.changed }}"
+
+    - name: 7. Detener y eliminar contenedor anterior (si existe)
+      community.docker.docker_container:
+        name: "{{ container_name }}"
+        state: absent
+      when: archivos_sync.changed
+
+    - name: 8. Ejecutar el contenedor en segundo plano
+      community.docker.docker_container:
+        name: "{{ container_name }}"
+        image: "{{ image_name }}"
+        state: started
+        restart_policy: always
+        detach: true
+        devices:
+          - "/dev/video0:/dev/video0"
