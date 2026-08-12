@@ -1,0 +1,40 @@
+---
+- name: Desplegar Phone Tracker en Raspberry Pi
+  hosts: raspberry
+  become: true
+  vars:
+    app_dir: "/home/{{ ansible_user }}/phone_tracker"
+
+  tasks:
+    - name: 1. Actualizar la caché de apt
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: 2. Instalar paquetes de manejo de hardware de video
+      ansible.builtin.apt:
+        name:
+          - v4l-utils
+          - libcamera-utils
+        state: present
+
+    - name: 3. Agregar al usuario actual al grupo video
+      ansible.builtin.user:
+        name: "{{ ansible_user }}"
+        groups: video
+        append: yes
+
+    - name: 4. Crear el directorio de la aplicación
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: 5. Copiar main.py al directorio destino
+      ansible.builtin.copy:
+        src: ./main.py
+        dest: "{{ app_dir }}/main.py"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0744'
