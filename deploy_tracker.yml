@@ -14,7 +14,7 @@
       ansible.builtin.apt:
         name:
           - v4l-utils
-          - libcamera-utils
+          - libcamera-apps
         state: present
 
     - name: 3. Agregar al usuario actual al grupo video
